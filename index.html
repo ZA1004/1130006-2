@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 商店槍戰遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif, 'Microsoft JhengHei', '微軟正黑體';
+            background-color: #111;
+        }
+        canvas {
+            display: block;
+        }
+        /* 介面元素的基本樣式 */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            text-align: center;
+            user-select: none;
+            transition: opacity 0.3s ease-in-out;
+        }
+        /* 受傷閃紅效果 */
+        #damage-flash {
+            background-color: rgba(255, 0, 0, 0);
+            pointer-events: none;
+            transition: background-color 0.1s ease-out;
+            z-index: 10;
+        }
+        /* 十字準心 */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            mix-blend-mode: difference;
+            display: none;
+        }
+        /* 遊戲中的抬頭顯示器 (HUD) */
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 1.5rem;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+            display: none;
+        }
+        /* 彈藥 HUD */
+        #ammo-hud {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 2rem;
+            text-align: right;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+            display: none;
+        }
+        #scope-indicator {
+            font-size: 1rem;
+            color: #67e8f9; /* cyan-300 */
+            display: none;
+        }
+        /* 菜單/提示畫面 */
+        #menu, #gameOver, #shop-menu {
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 2rem;
+            border-radius: 1rem;
+            backdrop-filter: blur(10px);
+        }
+        .title {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        .subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            max-width: 600px;
+        }
+        .button, .shop-button {
+            padding: 0.75rem 1.5rem;
+            background-color: #4f46e5;
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 1rem;
+        }
+        .button:hover, .shop-button:hover {
+            background-color: #6366f1;
+        }
+        .shop-button:disabled {
+            background-color: #312e81;
+            cursor: not-allowed;
+        }
+        #shop-items {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .shop-item {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .item-name {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .item-cost {
+            font-size: 1.2rem;
+            color: #facc15; /* yellow-400 */
+            margin-bottom: 1rem;
+        }
+        #game-message {
+            position: absolute;
+            top: 25%;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 2rem;
+            color: white;
+            text-shadow: 2px 2px 4px #000;
+            padding: 1rem 2rem;
+            background-color: rgba(0,0,0,0.5);
+            border-radius: 1rem;
+            display: none;
+            pointer-events: none;
+        }
+        .author {
+            position: absolute;
+            bottom: 2rem;
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <!-- 遊戲主畫布 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 受傷閃紅效果 -->
+    <div id="damage-flash" class="overlay"></div>
+
+    <!-- 十字準心 -->
+    <div id="crosshair"></div>
+
+    <!-- 遊戲中的資訊顯示 (分數、生命) -->
+    <div id="hud">
+        <div id="score">分數: 0</div>
+        <div id="health">生命: 1000</div>
+    </div>
+
+     <!-- 彈藥資訊 -->
+    <div id="ammo-hud">
+        <div id="scope-indicator">瞄準鏡</div>
+        <div id="weapon-name" class="text-lg">手槍</div>
+        <div>
+            <span id="current-ammo">12</span> / <span id="max-ammo">12</span>
+        </div>
+        <div id="grenade-count" class="text-lg mt-2">💣 x 0</div>
+    </div>
+
+    <!-- 遊戲開始菜單 -->
+    <div id="menu" class="overlay">
+        <div class="title">3D 多人槍戰</div>
+        <div class="subtitle">
+            使用 <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> 移動，<kbd>空白鍵</kbd> 跳躍。<br>
+            <kbd>左鍵</kbd> 射擊，<kbd>右鍵</kbd> 開鏡。 <kbd>E</kbd>/<kbd>V</kbd> 互動。<br>
+            <kbd>R</kbd> 鍵重新裝彈，<kbd>Q</kbd> 鍵切換武器，<kbd>C</kbd> 鍵丟手榴彈。
+        </div>
+        <div class="flex space-x-4">
+            <button id="startButton" class="button">開始遊戲</button>
+            <button id="fullscreenButton" class="button">切換全螢幕</button>
+        </div>
+        <div class="author">作者: 黃子銨</div>
+    </div>
+    
+    <!-- 商店介面 -->
+    <div id="shop-menu" class="overlay" style="display: none; opacity: 0;">
+        <div>
+            <div class="title">商店</div>
+            <div class="subtitle" id="shop-timer">下一波將在 30 秒後開始</div>
+            <div id="shop-items">
+                <!-- 商店物品會由 JS 動態產生 -->
+            </div>
+            <button id="close-shop" class="button">關閉商店並開始</button>
+        </div>
+    </div>
+
+    <!-- 遊戲中訊息 -->
+    <div id="game-message"></div>
+
+    <!-- 遊戲結束畫面 -->
+    <div id="gameOver" class="overlay" style="display: none;">
+        <div class="title">遊戲結束</div>
+        <div id="finalScore" class="subtitle">你的最終分數是: 0</div>
+        <button id="restartButton" class="button">重新開始</button>
+    </div>
+
+    <!-- 引入 Three.js 函式庫 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // --- 全域變數 ---
+        let scene, camera, renderer, controls;
+        let playerVelocity, onGround = false;
+        const objects = [];
+        const enemies = [];
+        const teammates = [];
+        const bullets = [];
+        const enemyBullets = [];
+        const teammateBullets = [];
+        const grenades = [];
+        const drops = [];
+        const supplyCrates = [];
+        let score = 0;
+        let playerHealth = 1000;
+        const maxPlayerHealth = 1000;
+        let lastTime = performance.now();
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let canJump = false, gamePaused = false, isMouseDown = false, isAiming = false;
+        let playerHasScope = false;
+
+        // 武器與相機系統
+        const weapons = {
+            'pistol': { name: '手槍', fireRate: 250, damage: 50, maxAmmo: 12, reloadTime: 1200 },
+            'rifle': { name: '步槍', fireRate: 120, damage: 50, maxAmmo: 120, reloadTime: 2000 },
+            'shotgun': { name: '霰彈槍', fireRate: 800, damage: 15, maxAmmo: 8, reloadTime: 3000, pellets: 6 }
+        };
+        let playerWeapons = ['pistol'];
+        let currentWeaponIndex = 0;
+        let weaponAmmo = {}; 
+        
+        let gunRifle, gunPistol, gunShotgun, currentGun;
+        let hipFirePosition = new THREE.Vector3(0.7, -0.4, -1.2);
+        let adsPosition = new THREE.Vector3(0, -0.3, -1);
+        let recoilAmount = 0;
+        const recoilReturnSpeed = 10;
+        
+        const defaultFOV = 75;
+        const aimFOV = 50;
+        const scopeFOV = 20;
+
+        let grenadeCount = 0;
+        let lastShotTime = 0;
+        let isReloading = false;
+        let enemySpawnTimer = 0;
+        let currentWave = 0;
+        let enemiesToSpawn = 0;
+        let enemiesRemaining = 0;
+        let shopOpen = false;
+        let shopTimer = 30;
+        let shopInterval;
+
+        // --- DOM 元素 ---
+        const menuPanel = document.getElementById('menu');
+        const startButton = document.getElementById('startButton');
+        const fullscreenButton = document.getElementById('fullscreenButton');
+        const gameOverPanel = document.getElementById('gameOver');
+        const restartButton = document.getElementById('restartButton');
+        const scoreElement = document.getElementById('score');
+        const healthElement = document.getElementById('health');
+        const finalScoreElement = document.getElementById('finalScore');
+        const crosshair = document.getElementById('crosshair');
+        const hud = document.getElementById('hud');
+        const ammoHud = document.getElementById('ammo-hud');
+        const currentAmmoElement = document.getElementById('current-ammo');
+        const maxAmmoElement = document.getElementById('max-ammo');
+        const weaponNameElement = document.getElementById('weapon-name');
+        const grenadeCountElement = document.getElementById('grenade-count');
+        const shopMenu = document.getElementById('shop-menu');
+        const shopTimerElement = document.getElementById('shop-timer');
+        const closeShopButton = document.getElementById('close-shop');
+        const gameMessage = document.getElementById('game-message');
+        const damageFlashElement = document.getElementById('damage-flash');
+        const scopeIndicator = document.getElementById('scope-indicator');
+
+        // --- 初始化 ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.Fog(0x87ceeb, 0, 250);
+
+            camera = new THREE.PerspectiveCamera(defaultFOV, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.y = 10;
+            
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(100, 100, 50);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.top = 150;
+            directionalLight.shadow.camera.bottom = -150;
+            directionalLight.shadow.camera.left = -150;
+            directionalLight.shadow.camera.right = 150;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+            
+            playerVelocity = new THREE.Vector3();
+            controls = new PointerLockControls(camera, renderer.domElement);
+            scene.add(controls.getObject());
+
+            createGunModels();
+
+            const floorGeometry = new THREE.PlaneGeometry(400, 400);
+            const floorMaterial = new THREE.MeshLambertMaterial({ color: 0xcccccc });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            objects.push(floor);
+
+            createHouses();
+            createSupplyCrates();
+            setupEventListeners();
+            animate();
+        }
+        
+        function createGunModels() {
+            const gunMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x333333,
+                roughness: 0.5,
+                metalness: 0.8
+            });
+            const alwaysOnTopMaterial = gunMaterial.clone();
+            alwaysOnTopMaterial.depthTest = false;
+
+            const createPart = (geometry, material) => {
+                const part = new THREE.Mesh(geometry, material);
+                part.renderOrder = 999;
+                return part;
+            };
+            
+            const createScope = () => {
+                const scopeGroup = new THREE.Group();
+                scopeGroup.name = 'scope';
+                const scopeTube = createPart(new THREE.CylinderGeometry(0.1, 0.1, 0.8, 16), alwaysOnTopMaterial);
+                scopeTube.rotation.x = Math.PI / 2;
+                const scopeLens = createPart(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 16), alwaysOnTopMaterial);
+                scopeLens.rotation.x = Math.PI / 2;
+                scopeLens.position.z = 0.4;
+                const scopeEyepiece = createPart(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 16), alwaysOnTopMaterial);
+                scopeEyepiece.rotation.x = Math.PI / 2;
+                scopeEyepiece.position.z = -0.4;
+                scopeGroup.add(scopeTube, scopeLens, scopeEyepiece);
+                scopeGroup.position.set(0, 0.3, 0);
+                scopeGroup.visible = false;
+                return scopeGroup;
+            };
+
+            gunRifle = new THREE.Group();
+            gunRifle.add(createPart(new THREE.BoxGeometry(0.2, 0.3, 2.5), alwaysOnTopMaterial));
+            const rifleGrip = createPart(new THREE.BoxGeometry(0.2, 0.6, 0.3), alwaysOnTopMaterial);
+            rifleGrip.position.set(0, -0.4, -0.5); rifleGrip.rotation.x = -0.2;
+            gunRifle.add(rifleGrip);
+            const rifleMagazine = createPart(new THREE.BoxGeometry(0.2, 0.7, 0.5), alwaysOnTopMaterial);
+            rifleMagazine.position.set(0, -0.3, 0.3);
+            gunRifle.add(rifleMagazine);
+            gunRifle.add(createScope());
+
+            gunPistol = new THREE.Group();
+            gunPistol.add(createPart(new THREE.BoxGeometry(0.2, 0.3, 1), alwaysOnTopMaterial));
+            const pistolGrip = createPart(new THREE.BoxGeometry(0.2, 0.6, 0.3), alwaysOnTopMaterial);
+            pistolGrip.position.set(0, -0.3, 0); pistolGrip.rotation.x = -0.1;
+            gunPistol.add(pistolGrip);
+            const pistolScope = createScope();
+            pistolScope.scale.set(0.7,0.7,0.7);
+            pistolScope.position.y = 0.25;
+            gunPistol.add(pistolScope);
+
+            gunShotgun = new THREE.Group();
+            gunShotgun.add(createPart(new THREE.BoxGeometry(0.25, 0.35, 3), alwaysOnTopMaterial));
+            const shotgunPump = createPart(new THREE.BoxGeometry(0.2, 0.2, 1.5), alwaysOnTopMaterial);
+            shotgunPump.position.set(0, -0.15, 0.5);
+            gunShotgun.add(shotgunPump);
+            gunShotgun.add(createScope());
+
+            gunRifle.position.copy(hipFirePosition);
+            gunPistol.position.copy(hipFirePosition);
+            gunShotgun.position.copy(hipFirePosition);
+
+            gunRifle.scale.set(0.7, 0.7, 0.7);
+            gunPistol.scale.set(0.7, 0.7, 0.7);
+            gunShotgun.scale.set(0.7, 0.7, 0.7);
+
+            camera.add(gunRifle, gunPistol, gunShotgun);
+
+            switchWeapon(0);
+        }
+
+        function createHouses() {
+            const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xac8f78 });
+            const housePositions = [
+                new THREE.Vector3(-50, 0, -50), new THREE.Vector3(50, 0, -50),
+                new THREE.Vector3(0, 0, 60), new THREE.Vector3(-80, 0, 0),
+                new THREE.Vector3(80, 0, 0), new THREE.Vector3(-50, 0, 100),
+                new THREE.Vector3(50, 0, 100), new THREE.Vector3(120, 0, 40),
+                new THREE.Vector3(-120, 0, 40),
+            ];
+
+            housePositions.forEach(pos => {
+                const wall1 = new THREE.Mesh(new THREE.BoxGeometry(30, 18, 4), wallMaterial);
+                wall1.position.set(pos.x, 9, pos.z);
+                wall1.castShadow = true; wall1.receiveShadow = true;
+                scene.add(wall1);
+                objects.push(wall1);
+
+                const wall2 = new THREE.Mesh(new THREE.BoxGeometry(4, 18, 30), wallMaterial);
+                wall2.position.set(pos.x + 13, 9, pos.z + 13);
+                wall2.castShadow = true; wall2.receiveShadow = true;
+                scene.add(wall2);
+                objects.push(wall2);
+            });
+        }
+
+        function createSupplyCrates() {
+            const crateMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+            const cratePositions = [
+                new THREE.Vector3(0, 3, 0),
+                new THREE.Vector3(100, 3, 100),
+                new THREE.Vector3(-100, 3, -100),
+            ];
+            cratePositions.forEach(pos => {
+                const crate = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 6), crateMaterial);
+                crate.position.copy(pos);
+                crate.castShadow = true;
+                supplyCrates.push(crate);
+                scene.add(crate);
+            });
+        }
+
+        function setupEventListeners() {
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', startGame);
+            closeShopButton.addEventListener('click', closeShop);
+            fullscreenButton.addEventListener('click', toggleFullScreen);
+
+            controls.addEventListener('lock', () => {
+                menuPanel.style.display = 'none';
+                gameOverPanel.style.display = 'none';
+                crosshair.style.display = 'block';
+                hud.style.display = 'block';
+                ammoHud.style.display = 'block';
+            });
+
+            controls.addEventListener('unlock', () => {
+                if (playerHealth > 0 && !shopOpen) { 
+                    menuPanel.style.display = 'flex';
+                }
+                crosshair.style.display = 'none';
+                hud.style.display = 'none';
+                ammoHud.style.display = 'none';
+            });
+            
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('mouseup', onMouseUp);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {
+                    showMessage('全螢幕模式在此環境中被禁用', 3000);
+                });
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+            }
+        }
+
+        function startGame() {
+            resetGame();
+            controls.lock();
+        }
+
+        function resetGame() {
+            [enemies, teammates, bullets, enemyBullets, teammateBullets, grenades, drops, supplyCrates].forEach(arr => {
+                arr.forEach(item => scene.remove(item.mesh || item));
+                arr.length = 0;
+            });
+
+            playerHealth = maxPlayerHealth;
+            score = 0;
+            isReloading = false;
+            grenadeCount = 0;
+            playerHasScope = false;
+            
+            playerWeapons = ['pistol'];
+            weaponAmmo = { 'pistol': weapons.pistol.maxAmmo, 'rifle': 0, 'shotgun': 0 };
+            [gunRifle, gunPistol, gunShotgun].forEach(gun => gun.getObjectByName('scope').visible = false);
+            switchWeapon(0);
+
+            camera.position.set(0, 10, 0);
+            playerVelocity.set(0, 0, 0);
+            
+            currentWave = 0;
+            enemiesToSpawn = 0;
+            enemiesRemaining = 0;
+            gamePaused = false;
+            shopOpen = false;
+            clearInterval(shopInterval);
+
+            updateHUD();
+            gameOverPanel.style.display = 'none';
+            shopMenu.style.display = 'none';
+            
+            spawnTeammates(2);
+            createSupplyCrates();
+            startNextWave();
+        }
+        
+        function prepareNextWave() {
+            gamePaused = true;
+            showMessage(`第 ${currentWave} 波完成! 按 B 進入商店`, 30000);
+            shopTimer = 30;
+            clearInterval(shopInterval);
+            shopInterval = setInterval(() => {
+                shopTimer--;
+                shopTimerElement.textContent = `下一波將在 ${shopTimer} 秒後開始`;
+                if(shopTimer <= 0) closeShop();
+            }, 1000);
+        }
+
+        function startNextWave() {
+            currentWave++;
+            enemiesToSpawn = 5 + currentWave * 2;
+            enemiesRemaining = enemiesToSpawn;
+            gamePaused = false;
+        }
+
+        function gameOver() {
+            controls.unlock();
+            finalScoreElement.textContent = `你的最終分數是: ${score}`;
+            gameOverPanel.style.display = 'flex';
+        }
+
+        const shopItems = {
+            'rifle': { name: '步槍', cost: 200, type: 'weapon' },
+            'shotgun': { name: '霰彈槍', cost: 350, type: 'weapon' },
+            'grenade': { name: '手榴彈 x3', cost: 150, type: 'consumable' },
+            'ammo': { name: '彈藥補給', cost: 80, type: 'consumable' }
+        };
+
+        function openShop() {
+            if (gamePaused) {
+                shopOpen = true;
+                controls.unlock();
+                updateShopUI();
+                shopMenu.style.display = 'flex';
+                shopMenu.style.opacity = '1';
+                hideMessage();
+            }
+        }
+        
+        function closeShop() {
+            if (shopOpen) {
+                shopOpen = false;
+                controls.lock();
+                shopMenu.style.opacity = '0';
+                setTimeout(() => shopMenu.style.display = 'none', 300);
+                clearInterval(shopInterval);
+                startNextWave();
+            }
+        }
+
+        function updateShopUI() {
+            const container = document.getElementById('shop-items');
+            container.innerHTML = '';
+            Object.keys(shopItems).forEach(key => {
+                const item = shopItems[key];
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'shop-item';
+                const owned = playerWeapons.includes(key);
+                itemDiv.innerHTML = `<div class="item-name">${item.name}</div><div class="item-cost">分數: ${item.cost}</div><button class="shop-button" id="buy-${key}">${owned ? '已擁有' : '購買'}</button>`;
+                container.appendChild(itemDiv);
+                const button = document.getElementById(`buy-${key}`);
+                if (owned || score < item.cost) button.disabled = true;
+                button.addEventListener('click', () => buyItem(key));
+            });
+        }
+        
+        function buyItem(key) {
+            const item = shopItems[key];
+            if (score >= item.cost) {
+                score -= item.cost;
+                if (item.type === 'weapon') {
+                    playerWeapons.push(key);
+                    weaponAmmo[key] = weapons[key].maxAmmo;
+                } else if (key === 'grenade') {
+                    grenadeCount += 3;
+                } else if (key === 'ammo') {
+                    playerWeapons.forEach(wKey => {
+                        weaponAmmo[wKey] = weapons[wKey].maxAmmo;
+                    });
+                }
+                updateHUD();
+                updateShopUI();
+            }
+        }
+
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+                case 'Space': if (canJump) playerVelocity.y += 30; canJump = false; break;
+                case 'KeyR': if (!shopOpen) reload(); break;
+                case 'KeyQ': 
+                    if (!shopOpen) {
+                        currentWeaponIndex = (currentWeaponIndex + 1) % playerWeapons.length;
+                        switchWeapon(currentWeaponIndex);
+                    }
+                    break;
+                case 'KeyC': if (!shopOpen) throwGrenade(); break;
+                case 'KeyB': if (gamePaused && !shopOpen) openShop(); break;
+                case 'KeyE': if (!shopOpen) checkInteraction(); break;
+                case 'KeyV': if (!shopOpen) checkHealthPackPickup(); break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        }
+        
+        function onMouseDown(event) {
+            if (controls.isLocked) {
+                if (event.button === 0) isMouseDown = true;
+                else if (event.button === 2) isAiming = true;
+            }
+        }
+
+        function onMouseUp(event) {
+            if (event.button === 0) isMouseDown = false;
+            else if (event.button === 2) isAiming = false;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function update(delta) {
+            if (gamePaused || !controls.isLocked) return;
+            handleMovement(delta);
+            handleShooting(delta);
+            updateGunAndCamera(delta);
+            updateEnemies(delta);
+            updateTeammates(delta);
+            updateBullets(delta);
+            updateEnemyBullets(delta);
+            updateTeammateBullets(delta);
+            updateGrenades(delta);
+            updateDrops(delta);
+            handleSpawning(delta);
+            checkCollisions();
+            updateInteractionPrompt();
+            if (enemiesToSpawn === 0 && enemiesRemaining === 0 && playerHealth > 0) {
+                prepareNextWave();
+            }
+        }
+
+        function handleMovement(delta) {
+            const speed = 400.0;
+            playerVelocity.x -= playerVelocity.x * 10.0 * delta;
+            playerVelocity.z -= playerVelocity.z * 10.0 * delta;
+            playerVelocity.y -= 9.8 * 10.0 * delta; 
+            const direction = new THREE.Vector3();
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+            if (moveForward || moveBackward) playerVelocity.z -= direction.z * speed * delta;
+            if (moveLeft || moveRight) playerVelocity.x -= direction.x * speed * delta;
+            const oldPosition = controls.getObject().position.clone();
+            controls.moveRight(-playerVelocity.x * delta);
+            controls.moveForward(-playerVelocity.z * delta);
+            const playerCollider = new THREE.Box3().setFromCenterAndSize(
+                controls.getObject().position, new THREE.Vector3(2, 18, 2)
+            );
+            let collisionDetected = false;
+            for (const object of objects) {
+                if (object.geometry.type === 'PlaneGeometry') continue;
+                if (playerCollider.intersectsBox(new THREE.Box3().setFromObject(object))) {
+                    collisionDetected = true;
+                    break; 
+                }
+            }
+            if (collisionDetected) {
+                controls.getObject().position.copy(oldPosition);
+                playerVelocity.x = 0;
+                playerVelocity.z = 0;
+            }
+            controls.getObject().position.y += (playerVelocity.y * delta);
+            if (controls.getObject().position.y < 10) {
+                playerVelocity.y = 0;
+                controls.getObject().position.y = 10;
+                canJump = true;
+            }
+        }
+
+        function handleShooting(delta) {
+            if (!isMouseDown) return;
+            const weaponKey = playerWeapons[currentWeaponIndex];
+            if (weaponAmmo[weaponKey] > 0) {
+                 if (!isReloading && (performance.now() - lastShotTime > weapons[weaponKey].fireRate)) {
+                    lastShotTime = performance.now();
+                    shoot();
+                    weaponAmmo[weaponKey]--;
+                    updateHUD();
+                }
+            } else {
+                reload();
+            }
+        }
+        
+        function updateGunAndCamera(delta) {
+            const targetFOV = isAiming ? (playerHasScope ? scopeFOV : aimFOV) : defaultFOV;
+            camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 15 * delta);
+            camera.updateProjectionMatrix();
+
+            if(crosshair) crosshair.style.display = isAiming ? 'none' : 'block';
+
+            const targetPos = isAiming ? adsPosition : hipFirePosition;
+            if (recoilAmount > 0) {
+                recoilAmount -= recoilReturnSpeed * delta;
+                if (recoilAmount < 0) recoilAmount = 0;
+            }
+            const finalPosition = targetPos.clone();
+            finalPosition.z += recoilAmount;
+            finalPosition.y -= recoilAmount * 0.5;
+
+            if (currentGun) {
+                currentGun.position.lerp(finalPosition, 15 * delta);
+                currentGun.rotation.x = -recoilAmount * 0.5;
+            }
+        }
+
+        function handleSpawning(delta) {
+            if (enemiesToSpawn > 0) {
+                enemySpawnTimer += delta;
+                if(enemySpawnTimer > 1) {
+                    spawnEnemy();
+                    enemiesToSpawn--;
+                    enemySpawnTimer = 0;
+                }
+            }
+        }
+
+        function spawnEnemy() {
+            const enemyGroup = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(3, 4, 2), new THREE.MeshStandardMaterial({ color: 0x0055ff }));
+            body.position.y = 2; body.castShadow = true;
+            enemyGroup.add(body);
+            const head = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: 0xffd48a }));
+            head.position.y = 5; head.castShadow = true;
+            enemyGroup.add(head);
+            const gun = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 4), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+            gun.position.set(0, 2.5, 3);
+            enemyGroup.add(gun);
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 180 + Math.random() * 40;
+            enemyGroup.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+            const enemy = { mesh: enemyGroup, health: 100, speed: 3 + currentWave * 0.2, lastShotTime: 0 };
+            enemies.push(enemy);
+            scene.add(enemyGroup);
+        }
+        
+        function handleEnemyDeath(enemy, position) {
+            scene.remove(enemy.mesh);
+            const index = enemies.findIndex(e => e === enemy);
+            if (index > -1) enemies.splice(index, 1);
+            score += 200;
+            enemiesRemaining--;
+            updateHUD();
+            if (Math.random() < 0.5) spawnDrop(position);
+        }
+
+        function spawnDrop(position) {
+            const shape = new THREE.Shape();
+            shape.moveTo(-0.5, -1.5); shape.lineTo(0.5, -1.5); shape.lineTo(0.5, -0.5);
+            shape.lineTo(1.5, -0.5); shape.lineTo(1.5, 0.5); shape.lineTo(0.5, 0.5);
+            shape.lineTo(0.5, 1.5); shape.lineTo(-0.5, 1.5); shape.lineTo(-0.5, 0.5);
+            shape.lineTo(-1.5, 0.5); shape.lineTo(-1.5, -0.5); shape.lineTo(-0.5, -0.5);
+            shape.lineTo(-0.5, -1.5);
+            const dropMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false }), new THREE.MeshStandardMaterial({ color: 0x00ff00 }));
+            
+            dropMesh.position.copy(position);
+            dropMesh.position.y = 2;
+            dropMesh.castShadow = true;
+            const drop = { mesh: dropMesh, type: 'health' };
+            drops.push(drop);
+            scene.add(dropMesh);
+        }
+
+        function spawnTeammates(count) {
+            for (let i=0; i < count; i++) spawnTeammate();
+        }
+
+        function spawnTeammate() {
+            const allyGroup = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(3, 4, 2), new THREE.MeshStandardMaterial({ color: 0x00ff55 }));
+            body.position.y = 2; body.castShadow = true;
+            allyGroup.add(body);
+            const head = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: 0xffd48a }));
+            head.position.y = 5; head.castShadow = true;
+            allyGroup.add(head);
+            const gun = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 4), new THREE.MeshStandardMaterial({ color: 0x555555 }));
+            gun.position.set(0, 2.5, 3);
+            allyGroup.add(gun);
+            const playerPos = controls.getObject().position;
+            allyGroup.position.set(playerPos.x + Math.random() * 20 - 10, 0, playerPos.z + Math.random() * 20 - 10);
+            const teammate = { mesh: allyGroup, health: 150, speed: 4, lastShotTime: 0, target: null };
+            teammates.push(teammate);
+            scene.add(allyGroup);
+        }
+
+        function updateEnemies(delta) {
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                let closestTarget = controls.getObject();
+                let minDistance = enemy.mesh.position.distanceTo(closestTarget.position);
+                teammates.forEach(ally => {
+                    if (!ally.mesh) return;
+                    const dist = enemy.mesh.position.distanceTo(ally.mesh.position);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestTarget = ally.mesh;
+                    }
+                });
+                const targetPosition = closestTarget.position;
+                const direction = targetPosition.clone().sub(enemy.mesh.position).normalize();
+                if (minDistance > 80 * 0.8) {
+                    enemy.mesh.position.add(direction.clone().multiplyScalar(enemy.speed * delta));
+                }
+                enemy.mesh.lookAt(targetPosition);
+                if (minDistance < 80) {
+                    if ((performance.now() - enemy.lastShotTime) / 1000 > (1.5 - currentWave * 0.05)) {
+                        enemy.lastShotTime = performance.now();
+                        enemyShoot(enemy, targetPosition);
+                    }
+                }
+            }
+        }
+
+        function updateTeammates(delta) {
+            for (let i = teammates.length - 1; i >= 0; i--) {
+                const ally = teammates[i];
+                let closestEnemy = null;
+                let minDistance = Infinity;
+                enemies.forEach(enemy => {
+                    const dist = ally.mesh.position.distanceTo(enemy.mesh.position);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestEnemy = enemy;
+                    }
+                });
+                if (closestEnemy) {
+                    const targetPosition = closestEnemy.mesh.position;
+                    const direction = targetPosition.clone().sub(ally.mesh.position).normalize();
+                    if (minDistance > 90 * 0.7) {
+                        ally.mesh.position.add(direction.clone().multiplyScalar(ally.speed * delta));
+                    }
+                    ally.mesh.lookAt(targetPosition);
+                    if (minDistance < 90) {
+                        if ((performance.now() - ally.lastShotTime) / 1000 > 0.5) {
+                            ally.lastShotTime = performance.now();
+                            teammateShoot(ally, targetPosition);
+                        }
+                    }
+                } else {
+                    const playerPosition = controls.getObject().position;
+                    if (ally.mesh.position.distanceTo(playerPosition) > 20) {
+                         ally.mesh.position.add(playerPosition.clone().sub(ally.mesh.position).normalize().multiplyScalar(ally.speed * delta));
+                         ally.mesh.lookAt(playerPosition);
+                    }
+                }
+            }
+        }
+
+        function enemyShoot(enemy, targetPosition) {
+            const bulletMesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff4444 }));
+            const gunWorldPosition = new THREE.Vector3();
+            enemy.mesh.children[2].getWorldPosition(gunWorldPosition);
+            const direction = targetPosition.clone().sub(gunWorldPosition).normalize();
+            bulletMesh.position.copy(gunWorldPosition);
+            const bullet = { mesh: bulletMesh, velocity: direction.multiplyScalar(80), life: 3, damage: 100 };
+            enemyBullets.push(bullet);
+            scene.add(bulletMesh);
+        }
+        
+        function teammateShoot(ally, targetPosition) {
+            const bulletMesh = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), new THREE.MeshBasicMaterial({ color: 0x44ff44 }));
+            const gunWorldPosition = new THREE.Vector3();
+            ally.mesh.children[2].getWorldPosition(gunWorldPosition);
+            const direction = targetPosition.clone().sub(gunWorldPosition).normalize();
+            bulletMesh.position.copy(gunWorldPosition);
+            const bullet = { mesh: bulletMesh, velocity: direction.multiplyScalar(100), life: 3, damage: 20 };
+            teammateBullets.push(bullet);
+            scene.add(bulletMesh);
+        }
+
+        function shoot() {
+            recoilAmount = 0.15;
+            const weapon = weapons[playerWeapons[currentWeaponIndex]];
+            const createBullet = (spread) => {
+                const bulletMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+                const direction = new THREE.Vector3();
+                camera.getWorldDirection(direction);
+                if (spread) {
+                    direction.x += (Math.random() - 0.5) * 0.1;
+                    direction.y += (Math.random() - 0.5) * 0.1;
+                    direction.z += (Math.random() - 0.5) * 0.1;
+                    direction.normalize();
+                }
+                bulletMesh.position.copy(controls.getObject().position).add(direction.clone().multiplyScalar(2));
+                const bullet = { mesh: bulletMesh, velocity: direction.multiplyScalar(150), life: 3, damage: weapon.damage };
+                bullets.push(bullet);
+                scene.add(bulletMesh);
+            };
+            if (weapon.pellets) {
+                for(let i = 0; i < weapon.pellets; i++) createBullet(true);
+            } else {
+                createBullet(false);
+            }
+        }
+
+        function reload() {
+            if (isReloading) return;
+            const weaponKey = playerWeapons[currentWeaponIndex];
+            if (weaponAmmo[weaponKey] === weapons[weaponKey].maxAmmo) return;
+            isReloading = true;
+            setTimeout(() => {
+                weaponAmmo[weaponKey] = weapons[weaponKey].maxAmmo;
+                isReloading = false;
+                updateHUD();
+            }, weapons[weaponKey].reloadTime);
+        }
+
+        function switchWeapon(index) {
+            currentWeaponIndex = index;
+            const weaponKey = playerWeapons[index];
+            gunRifle.visible = (weaponKey === 'rifle');
+            gunPistol.visible = (weaponKey === 'pistol');
+            gunShotgun.visible = (weaponKey === 'shotgun');
+            currentGun = (weaponKey === 'rifle') ? gunRifle : (weaponKey === 'pistol') ? gunPistol : gunShotgun;
+            
+            [gunRifle, gunPistol, gunShotgun].forEach(gun => gun.getObjectByName('scope').visible = playerHasScope);
+
+            isReloading = false;
+            updateHUD();
+        }
+
+        function throwGrenade() {
+            if (grenadeCount <= 0) return;
+            grenadeCount--;
+            updateHUD();
+            const grenadeMesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), new THREE.MeshStandardMaterial({ color: 0x225522 }));
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            grenadeMesh.position.copy(controls.getObject().position).add(direction.clone().multiplyScalar(1.5));
+            const grenade = { mesh: grenadeMesh, velocity: new THREE.Vector3(), timer: 3 };
+            grenade.velocity.copy(direction).multiplyScalar(60);
+            grenade.velocity.y += 10;
+            grenades.push(grenade);
+            scene.add(grenadeMesh);
+        }
+        
+        function updateBullets(delta) {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                bullet.mesh.position.add(bullet.velocity.clone().multiplyScalar(delta));
+                bullet.life -= delta;
+                if (bullet.life <= 0) {
+                    scene.remove(bullet.mesh);
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        function updateEnemyBullets(delta) {
+            for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                const bullet = enemyBullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                bullet.mesh.position.add(bullet.velocity.clone().multiplyScalar(delta));
+                bullet.life -= delta;
+                if (bullet.life <= 0) {
+                    scene.remove(bullet.mesh);
+                    enemyBullets.splice(i, 1);
+                }
+            }
+        }
+
+        function updateTeammateBullets(delta) {
+            for (let i = teammateBullets.length - 1; i >= 0; i--) {
+                const bullet = teammateBullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                bullet.mesh.position.add(bullet.velocity.clone().multiplyScalar(delta));
+                bullet.life -= delta;
+                if (bullet.life <= 0) {
+                    scene.remove(bullet.mesh);
+                    teammateBullets.splice(i, 1);
+                }
+            }
+        }
+
+        function updateGrenades(delta) {
+            for(let i = grenades.length - 1; i >= 0; i--) {
+                const grenade = grenades[i];
+                grenade.velocity.y -= 9.8 * 2 * delta;
+                grenade.mesh.position.add(grenade.velocity.clone().multiplyScalar(delta));
+                grenade.timer -= delta;
+                if (grenade.mesh.position.y < 0.5) {
+                    grenade.mesh.position.y = 0.5;
+                    grenade.velocity.y *= -0.5;
+                    grenade.velocity.x *= 0.8;
+                    grenade.velocity.z *= 0.8;
+                }
+                if (grenade.timer <= 0) {
+                    explode(grenade.mesh.position);
+                    scene.remove(grenade.mesh);
+                    grenades.splice(i, 1);
+                }
+            }
+        }
+        
+        function updateDrops(delta) {
+            for(const drop of drops) {
+                drop.mesh.rotation.y += 1.5 * delta;
+                drop.mesh.position.y = 2 + Math.sin(lastTime * 0.002) * 0.5;
+            }
+        }
+
+        function explode(position) {
+            const blastRadius = 25;
+            const blastDamage = 5000;
+
+            const explosionFX = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.8 }));
+            explosionFX.position.copy(position);
+            scene.add(explosionFX);
+            let scale = 1;
+            const animateExplosion = () => {
+                scale += 1.5;
+                explosionFX.scale.set(scale, scale, scale);
+                explosionFX.material.opacity -= 0.04;
+                if (explosionFX.material.opacity > 0) requestAnimationFrame(animateExplosion);
+                else scene.remove(explosionFX);
+            };
+            animateExplosion();
+            
+            const smokeParticles = [];
+            for (let i = 0; i < 8; i++) {
+                const smokeMaterial = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.6 });
+                const smokeSphere = new THREE.Mesh(new THREE.SphereGeometry(2, 16, 16), smokeMaterial);
+                smokeSphere.position.copy(position).add(new THREE.Vector3((Math.random() - 0.5) * 5, Math.random() * 2, (Math.random() - 0.5) * 5));
+                smokeParticles.push(smokeSphere);
+                scene.add(smokeSphere);
+            }
+
+            let smokeLife = 0;
+            const animateSmoke = () => {
+                smokeLife++;
+                smokeParticles.forEach(p => {
+                    p.scale.multiplyScalar(1.05);
+                    p.material.opacity -= 0.02;
+                    p.position.y += 0.1;
+                });
+                if (smokeLife < 50) requestAnimationFrame(animateSmoke);
+                else smokeParticles.forEach(p => scene.remove(p));
+            };
+            animateSmoke();
+
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                const dist = enemy.mesh.position.distanceTo(position);
+                if (dist < blastRadius) {
+                    enemy.health -= blastDamage * (1 - dist / blastRadius);
+                    if (enemy.health <= 0) handleEnemyDeath(enemy, enemy.mesh.position.clone());
+                }
+            }
+        }
+        
+        function checkCollisions() {
+            const playerPosition = controls.getObject().position;
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                    if (bullet.mesh.position.distanceTo(enemy.mesh.position) < 4) {
+                        enemy.health -= bullet.damage;
+                        if (enemy.health <= 0) handleEnemyDeath(enemy, enemy.mesh.position.clone());
+                        scene.remove(bullet.mesh);
+                        bullets.splice(i, 1);
+                        break; 
+                    }
+                }
+            }
+            for (let i = teammateBullets.length - 1; i >= 0; i--) {
+                const bullet = teammateBullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                     if (bullet.mesh.position.distanceTo(enemy.mesh.position) < 4) {
+                        enemy.health -= bullet.damage;
+                        if (enemy.health <= 0) handleEnemyDeath(enemy, enemy.mesh.position.clone());
+                        scene.remove(bullet.mesh);
+                        teammateBullets.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+            for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                const bullet = enemyBullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                if (bullet.mesh.position.distanceTo(playerPosition) < 2) {
+                    scene.remove(bullet.mesh);
+                    enemyBullets.splice(i, 1);
+                    playerHealth -= bullet.damage;
+                    showDamageFlash();
+                    if(playerHealth < 0) playerHealth = 0;
+                    updateHUD();
+                    if (playerHealth <= 0) gameOver();
+                    break;
+                }
+            }
+            for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                const bullet = enemyBullets[i];
+                if (!bullet || !bullet.mesh) continue;
+                for(let j = teammates.length - 1; j >= 0; j--) {
+                    const ally = teammates[j];
+                    if (bullet.mesh.position.distanceTo(ally.mesh.position) < 4) {
+                        ally.health -= 20;
+                        if (ally.health <= 0) {
+                            scene.remove(ally.mesh);
+                            teammates.splice(j, 1);
+                        }
+                        scene.remove(bullet.mesh);
+                        enemyBullets.splice(i, 1);
+                        break; 
+                    }
+                }
+            }
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                if (enemy.mesh.position.distanceTo(playerPosition) < 4) {
+                    playerHealth -= 50;
+                    showDamageFlash();
+                    if(playerHealth < 0) playerHealth = 0;
+                    updateHUD();
+                    enemy.mesh.position.add(playerPosition.clone().sub(enemy.mesh.position).normalize().multiplyScalar(-10));
+                    if (playerHealth <= 0) gameOver();
+                }
+            }
+        }
+        
+        function checkInteraction() {
+            const playerPosition = controls.getObject().position;
+            for(let i = supplyCrates.length - 1; i >= 0; i--) {
+                const crate = supplyCrates[i];
+                if(playerPosition.distanceTo(crate.position) < 8) {
+                    if (!playerHasScope) {
+                        playerHasScope = true;
+                        [gunRifle, gunPistol, gunShotgun].forEach(gun => gun.getObjectByName('scope').visible = true);
+                        showMessage('已拾取瞄準鏡！', 2000);
+                        updateHUD();
+                        scene.remove(crate);
+                        supplyCrates.splice(i, 1);
+                    }
+                    break; 
+                }
+            }
+        }
+
+        function checkHealthPackPickup() {
+            const playerPosition = controls.getObject().position;
+            for(let i = drops.length - 1; i >= 0; i--) {
+                const drop = drops[i];
+                if(playerPosition.distanceTo(drop.mesh.position) < 8) {
+                    if (drop.type === 'health') {
+                        playerHealth = Math.min(maxPlayerHealth, playerHealth + 200);
+                        updateHUD();
+                        scene.remove(drop.mesh);
+                        drops.splice(i, 1);
+                        showMessage('已恢復生命值！', 1500);
+                    }
+                    break;
+                }
+            }
+        }
+
+        function updateInteractionPrompt() {
+            const playerPosition = controls.getObject().position;
+            let canInteract = false;
+            if (!playerHasScope) {
+                for(const crate of supplyCrates) {
+                    if(playerPosition.distanceTo(crate.position) < 8) {
+                        showMessage('按 E 開啟補給箱', 50);
+                        canInteract = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!canInteract) {
+                for(const drop of drops) {
+                    if(drop.type === 'health' && playerPosition.distanceTo(drop.mesh.position) < 8) {
+                        showMessage('按 V 拾取補血包', 50);
+                        canInteract = true;
+                        break;
+                    }
+                }
+            }
+
+            if(!canInteract && (gameMessage.textContent === '按 E 開啟補給箱' || gameMessage.textContent === '按 V 拾取補血包')) {
+                hideMessage();
+            }
+        }
+
+        function updateHUD() {
+            const weaponKey = playerWeapons[currentWeaponIndex];
+            if (!weaponKey) return;
+            const weaponData = weapons[weaponKey];
+            scoreElement.textContent = `分數: ${score}`;
+            healthElement.textContent = `生命: ${playerHealth}`;
+            weaponNameElement.textContent = weaponData.name;
+            currentAmmoElement.textContent = weaponAmmo[weaponKey];
+            maxAmmoElement.textContent = weaponData.maxAmmo;
+            grenadeCountElement.textContent = `💣 x ${grenadeCount}`;
+            scopeIndicator.style.display = playerHasScope ? 'block' : 'none';
+        }
+        
+        function showDamageFlash() {
+            damageFlashElement.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+            setTimeout(() => {
+                damageFlashElement.style.backgroundColor = 'rgba(255, 0, 0, 0)';
+            }, 100);
+        }
+        
+        function showMessage(text, duration) {
+            gameMessage.textContent = text;
+            gameMessage.style.display = 'block';
+            if(duration > 50) { // Don't auto-hide prompts
+                setTimeout(hideMessage, duration);
+            }
+        }
+        
+        function hideMessage() {
+            gameMessage.style.display = 'none';
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            const delta = (time - lastTime) / 1000;
+            if (playerHealth > 0) update(delta);
+            renderer.render(scene, camera);
+            lastTime = time;
+        }
+
+        init();
+    </script>
+</body>
+</html>
+
